@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using NexusBootstrap;
 using NexusBootstrap.Models;
 using NexusBootstrap.Services;
 
@@ -12,9 +13,19 @@ using NexusBootstrap.Services;
 //   Update mode (from an already-running NexusBeta, via NexusUpdateGate.razor):
 //     NexusBootstrap.exe --url <PackageUrl> --sha256 <hash> --relaunch <NexusBeta.exe path>
 //   Fresh-install mode (from iYamPOS's "Upgrade to NexusBeta" menu item):
-//     NexusBootstrap.exe --fresh-install --hddSerial <value> --contractSerial <value> --consoleBaseUrl <url>
+//     NexusBootstrap.exe --fresh-install --hddSerial <value> --contractSerial <value>
+// Console's base URL is no longer a caller-supplied argument (2026-09-01, Phase 5 recheck) - see
+// BootstrapEndpoints.cs. Also: --version, standalone, prints the assembly version and exits.
 
 var args_ = ParseArgs(args);
+
+// Checked before any Require(...) validation - --version must work standalone even when no other
+// arguments are present at all.
+if (args_.ContainsKey("version"))
+{
+    Console.WriteLine(typeof(BootstrapEndpoints).Assembly.GetName().Version?.ToString() ?? "unknown");
+    return 0;
+}
 
 string targetDir;
 string? packageUrl;
@@ -28,10 +39,10 @@ try
         targetDir = InstallationDirectoryResolver.ResolveForFreshInstall();
         Console.WriteLine($"Fresh-install mode. Target directory: {targetDir}");
 
-        Require(args_, "hddSerial", "consoleBaseUrl");
+        Require(args_, "hddSerial");
         var contractSerial = args_.GetValueOrDefault("contractSerial", "");
 
-        using var httpClient = new HttpClient { BaseAddress = new Uri(args_["consoleBaseUrl"]) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(BootstrapEndpoints.ConsoleBaseUrl) };
         var consoleClient = new ConsoleBootstrapClient(httpClient);
         var syncResult = await consoleClient.ResolveLatestPackageAsync(args_["hddSerial"], contractSerial);
 
@@ -39,6 +50,35 @@ try
         {
             Console.Error.WriteLine($"Could not resolve a release to install: {syncResult.Error}");
             return 1;
+        }
+
+        // Already-installed/already-current short-circuit (2026-09-01, Phase 5 recheck) - fresh-
+        // install mode is invoked unconditionally by iYamPOS's button on every click, including
+        // repeat clicks against a machine that's already up to date. Costs zero extra network calls -
+        // LatestVersion already came back from the ResolveLatestPackageAsync call above, which
+        // fresh-install mode was always going to make regardless. An unparseable version on either
+        // side is treated as stale (proceed with the real install) rather than silently trusted -
+        // never skip based on a comparison that couldn't actually be made. Downgrading an existing
+        // install is already structurally impossible here since this branch only fires when the
+        // existing version is >= latest.
+        var existingExePath = InstallationDirectoryResolver.RelaunchExePath(targetDir);
+        if (File.Exists(existingExePath))
+        {
+            // FileVersion, not ProductVersion (2026-09-01, recheck - real gap found live) - the .NET
+            // SDK appends a "+<git-hash>" suffix to ProductVersion (via SourceLink/
+            // InformationalVersion) for any project built inside a git repo, which Version.TryParse
+            // can't parse at all - that silently defeated this whole check on every real build,
+            // always falling into the safe-but-pointless "unparseable, proceed with update" path.
+            // FileVersion stays purely numeric.
+            var existingVersionString = FileVersionInfo.GetVersionInfo(existingExePath).FileVersion;
+            if (Version.TryParse(existingVersionString, out var existingVersion) &&
+                Version.TryParse(syncResult.LatestVersion, out var latestVersionParsed) &&
+                existingVersion >= latestVersionParsed)
+            {
+                Console.WriteLine($"Already up to date (installed {existingVersion}, latest {latestVersionParsed}) - launching existing installation.");
+                var launchedExisting = await new ProcessLauncher().LaunchAndConfirmAsync(existingExePath, TimeSpan.FromSeconds(3));
+                return launchedExisting ? 0 : 1;
+            }
         }
 
         packageUrl = syncResult.PackageUrl;
@@ -130,7 +170,7 @@ try
     var currentExePath = InstallationDirectoryResolver.RelaunchExePath(targetDir);
     if (File.Exists(currentExePath))
     {
-        previousVersion = FileVersionInfo.GetVersionInfo(currentExePath).ProductVersion ?? "unknown";
+        previousVersion = FileVersionInfo.GetVersionInfo(currentExePath).FileVersion ?? "unknown";
     }
 
     // State marker written BEFORE backup/replace starts (2026-09-01) - a crash anywhere from here
