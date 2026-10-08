@@ -13,7 +13,9 @@ using NexusBootstrap.Services;
 //   Update mode (from an already-running NexusBeta, via NexusUpdateGate.razor):
 //     NexusBootstrap.exe --url <PackageUrl> --sha256 <hash> --relaunch <NexusBeta.exe path>
 //   Fresh-install mode (from iYamPOS's "Upgrade to NexusBeta" menu item):
-//     NexusBootstrap.exe --fresh-install --hddSerial <value> --contractSerial <value>
+//     NexusBootstrap.exe --fresh-install --hddSerial <value> --contractSerial <value> [--no-launch]
+//     (--no-launch, 2026-10-08: install/verify only, exit 0, never start NexusBeta - used by iYamPOS's
+//     first NexusBeta preparation, which opens the app itself only after its data migration succeeded)
 // Console's base URL is no longer a caller-supplied argument (2026-09-01, Phase 5 recheck) - see
 // BootstrapEndpoints.cs. Also: --version, standalone, prints the assembly version and exits.
 
@@ -26,6 +28,14 @@ if (args_.ContainsKey("version"))
     Console.WriteLine(typeof(BootstrapEndpoints).Assembly.GetName().Version?.ToString() ?? "unknown");
     return 0;
 }
+
+// --no-launch (2026-10-08, pilot smoke-test pass) - fresh-install only. iYamPOS's first NexusBeta
+// preparation installs FIRST and only opens NexusBeta after its Access -> Postgres migration succeeded,
+// so Bootstrap must install/verify and exit 0 without starting the app (a first launch on an
+// unprepared database would import activation and self-seed while the migration is resetting it).
+// Without the relaunch the "new version stays running" confirmation can't happen, so the install is
+// verified by the installed exe's FileVersion matching the release instead.
+bool noLaunch = args_.ContainsKey("fresh-install") && args_.ContainsKey("no-launch");
 
 string targetDir;
 string? packageUrl;
@@ -75,6 +85,11 @@ try
                 Version.TryParse(syncResult.LatestVersion, out var latestVersionParsed) &&
                 existingVersion >= latestVersionParsed)
             {
+                if (noLaunch)
+                {
+                    Console.WriteLine($"Already up to date (installed {existingVersion}, latest {latestVersionParsed}) - not launching (--no-launch).");
+                    return 0;
+                }
                 Console.WriteLine($"Already up to date (installed {existingVersion}, latest {latestVersionParsed}) - launching existing installation.");
                 var launchedExisting = await new ProcessLauncher().LaunchAndConfirmAsync(existingExePath, TimeSpan.FromSeconds(3));
                 return launchedExisting ? 0 : 1;
@@ -109,6 +124,27 @@ if (!instanceLock.Acquired)
 }
 
 var replacer = new InstallationReplacer();
+var preflight = new PreflightChecker(new DiskSpaceChecker());
+
+// PostgreSQL provisioning (2026-09-03) - fresh-install mode only, since update mode is invoked
+// from an already-running NexusBeta, which implies Postgres already works on this machine.
+// installationId is hddSerial - already the unique-per-machine value fresh-install mode requires
+// (see Require(args_, "hddSerial") above), and it's what PostgresInitializer needs to derive a
+// stable per-install role name. A failure here blocks the run entirely (return 1, never fall
+// through to downloading NexusBeta) - there's no point installing an app that can't reach its
+// database, and provisioning failure/rotation is the one case explicitly deferred to a human per
+// the locked design (CredentialMismatch, or a superuser password prompt that doesn't match).
+if (args_.ContainsKey("fresh-install"))
+{
+    Console.WriteLine("Checking PostgreSQL...");
+    var pgResult = await preflight.CheckPostgresProvisionedAsync(args_["hddSerial"], msg => Console.WriteLine(msg));
+
+    if (!pgResult.Passed)
+    {
+        Console.Error.WriteLine(pgResult.Error);
+        return 1;
+    }
+}
 
 // Crash recovery (2026-09-01) - if a PREVIOUS Bootstrap run left a PendingUpdate marker (e.g. the
 // machine lost power between replacing files and confirming the new version launched), resolve it
@@ -128,7 +164,6 @@ if (leftoverState is { PendingUpdate: true })
 
 using var httpClientForDownload = new HttpClient();
 var downloader = new PackageDownloader(httpClientForDownload);
-var preflight = new PreflightChecker(new DiskSpaceChecker());
 var launcher = new ProcessLauncher();
 
 Console.WriteLine("Downloading and verifying package...");
@@ -188,6 +223,27 @@ try
 
     Console.WriteLine("Installing new version...");
     replacer.ExtractNewVersion(download.TempZipPath!, targetDir);
+
+    if (noLaunch)
+    {
+        var installedVersion = File.Exists(currentExePath) ? FileVersionInfo.GetVersionInfo(currentExePath).FileVersion : null;
+        bool versionMatches = File.Exists(currentExePath) &&
+            (latestVersion is null ||
+             (Version.TryParse(installedVersion, out var iv) && Version.TryParse(latestVersion, out var lv) && iv >= lv));
+        if (versionMatches)
+        {
+            replacer.Commit(targetDir);
+            UpdateState.Delete(targetDir);
+            Console.WriteLine($"Install complete ({installedVersion}) - not launching (--no-launch).");
+            return 0;
+        }
+
+        Console.Error.WriteLine($"Installed files don't match the release (found {installedVersion ?? "no NexusBeta.exe"}, expected {latestVersion}) - rolling back.");
+        if (Directory.Exists(InstallationReplacer.PreviousDir(targetDir)))
+            replacer.Rollback(targetDir);
+        UpdateState.Delete(targetDir);
+        return 1;
+    }
 
     Console.WriteLine("Launching new version...");
     bool launchedOk = await launcher.LaunchAndConfirmAsync(currentExePath, TimeSpan.FromSeconds(10));

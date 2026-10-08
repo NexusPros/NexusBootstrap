@@ -7,4 +7,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Explicit, deliberate exception to this project's own "database access belongs in
+       NexusBeta/Console, never here" charter (see Program.cs's header comment) - first-run
+       PostgreSQL provisioning is install-time infrastructure setup (does the database exist? no?
+       install it), not the runtime querying/CRUD the charter is actually guarding against. See
+       PreflightChecker.CheckPostgresProvisionedAsync for the one call site this reference exists
+       for. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\NexusProShared\NexusPostgresProvisioning\NexusPostgresProvisioning\NexusPostgresProvisioning.csproj" />
+  </ItemGroup>
+
 </Project>
