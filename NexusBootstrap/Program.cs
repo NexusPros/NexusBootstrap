@@ -29,6 +29,20 @@ if (args_.ContainsKey("version"))
     return 0;
 }
 
+// --verify-package <folder> [--expect-version x.y.z] (2026-10-12) - standalone, read-only. Used by
+// release.yml on the extracted FINAL zip so a package whose assemblies don't match (the 1.0.1 pilot
+// crash) fails the release instead of reaching clients. Exit 0 = passed, 2 = problems found.
+if (args_.ContainsKey("verify-package"))
+{
+    var verify = PackageIntegrityChecker.Check(args_["verify-package"], args_.GetValueOrDefault("expect-version"));
+    Console.WriteLine($"Package check: {verify.AssembliesChecked} assemblies checked, {verify.Problems.Count} problem(s).");
+    foreach (var problem in verify.Problems)
+        Console.Error.WriteLine("  " + problem);
+    foreach (var note in verify.Notes)
+        Console.WriteLine("  note: " + note);
+    return verify.Passed ? 0 : 2;
+}
+
 // --no-launch (2026-10-08, pilot smoke-test pass) - fresh-install only. iYamPOS's first NexusBeta
 // preparation installs FIRST and only opens NexusBeta after its Access -> Postgres migration succeeded,
 // so Bootstrap must install/verify and exit 0 without starting the app (a first launch on an
@@ -224,6 +238,30 @@ try
     Console.WriteLine("Installing new version...");
     replacer.ExtractNewVersion(download.TempZipPath!, targetDir);
 
+    // Integrity check BEFORE commit/launch (2026-10-12) - the previous version is still in previous/ at
+    // this point, so a broken package is undone here instead of being committed. This is the only
+    // startup-safety check possible on the --no-launch path (NexusBeta must not open before iYamPOS has
+    // prepared its database); "installed" is reported as installed, never as "started".
+    var integrity = PackageIntegrityChecker.Check(targetDir, latestVersion);
+    if (!integrity.Passed)
+    {
+        Console.Error.WriteLine("The downloaded release is damaged or inconsistent, so it was NOT installed:");
+        foreach (var problem in integrity.Problems)
+            Console.Error.WriteLine("  " + problem);
+        if (Directory.Exists(InstallationReplacer.PreviousDir(targetDir)))
+        {
+            replacer.Rollback(targetDir);
+            Console.Error.WriteLine("The previous version was restored.");
+        }
+        else
+        {
+            replacer.RemoveAppFiles(targetDir);
+        }
+        UpdateState.Delete(targetDir);
+        return 1;
+    }
+    Console.WriteLine($"Package check passed ({integrity.AssembliesChecked} assemblies).");
+
     if (noLaunch)
     {
         var installedVersion = File.Exists(currentExePath) ? FileVersionInfo.GetVersionInfo(currentExePath).FileVersion : null;
@@ -234,7 +272,7 @@ try
         {
             replacer.Commit(targetDir);
             UpdateState.Delete(targetDir);
-            Console.WriteLine($"Install complete ({installedVersion}) - not launching (--no-launch).");
+            Console.WriteLine($"Install complete ({installedVersion}) - installed and checked, NOT started (--no-launch).");
             return 0;
         }
 

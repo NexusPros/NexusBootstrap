@@ -58,6 +58,24 @@ public class InstallationReplacer
         ZipFile.ExtractToDirectory(zipPath, targetDir, overwriteFiles: true);
     }
 
+    // First install that failed its integrity check (2026-10-12) - there is no previous/ to restore, so
+    // remove the extracted files instead of leaving a broken app that the "already up to date" check would
+    // later accept and launch. Same reserved-name rule as everywhere else in this class.
+    public void RemoveAppFiles(string targetDir)
+    {
+        foreach (var entry in Directory.EnumerateFileSystemEntries(targetDir))
+        {
+            var name = Path.GetFileName(entry);
+            if (ReservedNames.Contains(name))
+                continue;
+
+            if (Directory.Exists(entry))
+                Directory.Delete(entry, recursive: true);
+            else
+                File.Delete(entry);
+        }
+    }
+
     // Deletes whatever's currently in targetDir (the bad new version that failed to launch), then
     // restores everything from previous/ back into place. Reserved names (the marker, the lock)
     // survive this - the caller clears the marker itself once rollback completes successfully.

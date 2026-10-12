@@ -7,6 +7,26 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Single-file, self-contained deployment (2026-10-12, pilot crash root cause). Bootstrap used to
+       publish as a folder of ~190 files; release.yml copied that whole folder into NexusBeta's own app
+       folder and its NexusDbShared 1.0.0 / Npgsql 4.1.14 overwrote NexusBeta's versions, so NexusBeta
+       1.0.1 could not start anywhere. NexusUpdateGate also stages only NexusBootstrap.exe, which could
+       never run without the files beside it. One self-contained exe fixes both: nothing to collide,
+       nothing left behind when staged. Not trimmed (Npgsql/reflection). No native files are expected
+       (the runtime is linked into the single-file host); IncludeNativeLibrariesForSelfExtract stays off
+       on purpose so nothing is ever unpacked into %TEMP% at start-up (blocked on some PCs). Debug
+       symbols embedded so the publish folder holds the exe only. These apply to `dotnet publish -r
+       win-x64` only - a normal build/run is unchanged. -->
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>embedded</DebugType>
+    <!-- referenced projects' .pdb files would otherwise be copied beside the exe -->
+    <AllowedReferenceRelatedFileExtensions>.none</AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+
   <!-- Explicit, deliberate exception to this project's own "database access belongs in
        NexusBeta/Console, never here" charter (see Program.cs's header comment) - first-run
        PostgreSQL provisioning is install-time infrastructure setup (does the database exist? no?
