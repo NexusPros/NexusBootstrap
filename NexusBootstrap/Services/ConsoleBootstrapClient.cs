@@ -53,7 +53,9 @@ public class ConsoleBootstrapClient
                 AppVersion = "0.0.0",
                 Latitude = (double?)null,
                 Longitude = (double?)null,
-                UnitTitle = "NexusBootstrap",
+                // No device name (2026-10-13, pilot): Bootstrap doesn't know it, and "NexusBootstrap" replaced the
+                // real one in Console. NexusBeta / iYamPOS report the real name; Console also ignores the old value.
+                UnitTitle = (string?)null,
                 ClientPlatform = "NexusBeta",
             });
 
