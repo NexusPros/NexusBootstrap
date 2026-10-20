@@ -18,6 +18,8 @@ using NexusBootstrap.Services;
 //     first NexusBeta preparation, which opens the app itself only after its data migration succeeded)
 // Console's base URL is no longer a caller-supplied argument (2026-09-01, Phase 5 recheck) - see
 // BootstrapEndpoints.cs. Also: --version, standalone, prints the assembly version and exits.
+// NexusBeta restore (2026-10-20, restore plan v2): --restore-check (read-only pre-check, exit 0 / 3), --restore and
+// --restore-recover (Restore/RestoreCommand.cs).
 
 var args_ = ParseArgs(args);
 
@@ -42,6 +44,18 @@ if (args_.ContainsKey("verify-package"))
         Console.WriteLine("  note: " + note);
     return verify.Passed ? 0 : 2;
 }
+
+// --restore-check (2026-10-20, NexusBeta restore plan v2) - standalone, read-only: can the app role restore this PC's
+// databases in place? Exit 0 = OK, 3 = support needed. See Restore/RestoreCheckCommand.cs.
+if (args_.ContainsKey("restore-check"))
+    return await NexusBootstrap.Restore.RestoreCheckCommand.RunAsync();
+
+// --restore / --restore-recover (2026-10-20, restore plan v2) - see Restore/RestoreCommand.cs. Before the update path:
+// a restore never downloads or replaces app files.
+if (args_.ContainsKey("restore-recover"))
+    return await NexusBootstrap.Restore.RestoreCommand.RunAsync(args_, recoverOnly: true);
+if (args_.ContainsKey("restore"))
+    return await NexusBootstrap.Restore.RestoreCommand.RunAsync(args_, recoverOnly: false);
 
 // --no-launch (2026-10-08, pilot smoke-test pass) - fresh-install only. iYamPOS's first NexusBeta
 // preparation installs FIRST and only opens NexusBeta after its Access -> Postgres migration succeeded,

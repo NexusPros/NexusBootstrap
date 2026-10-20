@@ -35,6 +35,9 @@
        for. -->
   <ItemGroup>
     <ProjectReference Include="..\..\NexusProShared\NexusPostgresProvisioning\NexusPostgresProvisioning\NexusPostgresProvisioning.csproj" />
+    <!-- NexusBeta restore engine (2026-10-20, restore plan v2): the restore-check mode now, restore / restore-recover
+         next. Same Npgsql 4.1.14 as provisioning, so the single-file exe still carries one Npgsql. -->
+    <ProjectReference Include="..\..\NexusProShared\NexusPostgresRestore\NexusPostgresRestore\NexusPostgresRestore.csproj" />
   </ItemGroup>
 
 </Project>
