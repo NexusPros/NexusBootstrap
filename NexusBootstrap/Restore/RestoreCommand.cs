@@ -70,7 +70,7 @@ internal static class RestoreCommand
         if (!recoverOnly && activation == null)
             return Fail(JobOutcome.SupportNeeded, "NoActivation", "This PC's NexusBeta activation can't be read for this Windows user.");
 
-        using var http = new HttpClient { BaseAddress = new Uri(BootstrapEndpoints.ConsoleBaseUrl), Timeout = TimeSpan.FromSeconds(60) };
+        using var http = new HttpClient { BaseAddress = new Uri(ConsoleUrl(args)), Timeout = TimeSpan.FromSeconds(60) };
         var console = activation != null ? new ConsoleRestoreClient(http, activation, key) : (NexusPostgresRestore.Recovery.IRestoreConsole)new OfflineConsole();
         var job = new LocalRestoreJob(login, new JournalStore(), console, Path.Combine(RestoreGuard.RestoreFolder, "work"), () => DateTime.UtcNow);
 
@@ -86,6 +86,15 @@ internal static class RestoreCommand
             Path.GetFullPath(setFolder), Path.GetFullPath(safetyFolder),
             activation!.OrganizationId, activation.BranchId, NexusDbConn.OrganizationDbName, NexusDbConn.BranchDbName));
     }
+
+    // Dev testing (2026-10-21, S3): a Debug NexusBeta talks to a Console on this PC and passes --console https://localhost:<port>
+    // so the grant and the reports go to that same Console. ONLY an https localhost address is accepted - anything else is
+    // ignored and the production Console is used, so the argument can never send a restore's calls to another server.
+    private static string ConsoleUrl(Dictionary<string, string> args)
+        => args.TryGetValue("console", out var url) && Uri.TryCreate(url, UriKind.Absolute, out var uri)
+           && uri.Scheme == Uri.UriSchemeHttps && (uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            ? uri.GetLeftPart(UriPartial.Authority)
+            : BootstrapEndpoints.ConsoleBaseUrl;
 
     // One line on standard input, only when it is redirected (never a prompt on a console).
     private static string? ReadKeyFromStdin()

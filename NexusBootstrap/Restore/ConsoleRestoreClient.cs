@@ -48,6 +48,7 @@ internal sealed class ConsoleRestoreClient(HttpClient http, Activation activatio
                 ? new { journal.Safety.TakenAtUtc, OrganizationDbSha256 = journal.Safety.Organization.Sha256, BranchDbSha256 = journal.Safety.Branch.Sha256 }
                 : null,
             report.Case,
+            report.Event,
             ReportedAtUtc = report.AtUtc,
         };
         try

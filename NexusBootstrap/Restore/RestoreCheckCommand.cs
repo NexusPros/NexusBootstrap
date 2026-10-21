@@ -28,7 +28,8 @@ internal static class RestoreCheckCommand
         var login = new PgLogin(credential.Host, credential.Port, credential.Username, credential.Password, credential.SslMode);
         var result = await LocalRestorePrecheck.RunAsync(login, [NexusDbConn.OrganizationDbName, NexusDbConn.BranchDbName]);
 
-        Console.WriteLine($"PostgreSQL {result.ServerVersion ?? "unknown"}; tools: {result.ToolsFolder ?? "not found"}");
+        Console.WriteLine($"PostgreSQL {result.ServerVersion ?? "unknown"}; tools: {result.ToolsFolder ?? "not found"}; " +
+                          $"data: {result.DataDrive?.Folder ?? "not found"} ({(result.DataDrive?.FreeBytes ?? 0) / 1024 / 1024} MB free)");
         if (result.Ok)
         {
             Console.WriteLine("RESULT OK");
