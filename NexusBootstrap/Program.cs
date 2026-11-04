@@ -57,6 +57,11 @@ if (args_.ContainsKey("restore-recover"))
 if (args_.ContainsKey("restore"))
     return await NexusBootstrap.Restore.RestoreCommand.RunAsync(args_, recoverOnly: false);
 
+// --pre-reset-backup --org <guid> --branch <int> (2026-11-04, R0) - a verified backup set of both databases right before iYamPOS's
+// NexusBeta preparation erases them; never downloads or replaces app files. See Safety/PreResetBackupCommand.cs.
+if (args_.ContainsKey("pre-reset-backup"))
+    return await NexusBootstrap.Safety.PreResetBackupCommand.RunAsync(args_);
+
 // --no-launch (2026-10-08, pilot smoke-test pass) - fresh-install only. iYamPOS's first NexusBeta
 // preparation installs FIRST and only opens NexusBeta after its Access -> Postgres migration succeeded,
 // so Bootstrap must install/verify and exit 0 without starting the app (a first launch on an
